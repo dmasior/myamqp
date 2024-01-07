@@ -6,17 +6,32 @@ import (
 	"github.com/rabbitmq/amqp091-go"
 )
 
+// Consumer represents a consumer.
 type Consumer struct {
 	channel *amqp091.Channel
 	done    chan error
-	options ConsumerOptions
+	options *ConsumerOptions
 }
 
+// HandleFunc is a function that handles incoming deliveries.
 type HandleFunc func(deliveries <-chan amqp091.Delivery, done chan error)
 
-func (s *MyAMQP) Consumer(options ConsumerOptions, handler HandleFunc) (*Consumer, error) {
-	if s.conn == nil {
+// Consumer creates a new consumer with the given ConsumerOptions and HandleFunc.
+func (s *MyAMQP) Consumer(options *ConsumerOptions, handler HandleFunc) (*Consumer, error) {
+	if s.conn == nil || s.conn.IsClosed() {
 		return nil, ErrNotConnected
+	}
+
+	if options == nil {
+		return nil, ErrOptionsCannotBeNil
+	}
+
+	if options.exchangeOpts == nil {
+		return nil, ErrExchangeOptionsCannotBeNil
+	}
+
+	if options.queueOpts == nil {
+		return nil, ErrQueueOptionsCannotBeNil
 	}
 
 	if err := s.channel.ExchangeDeclare(
@@ -76,6 +91,7 @@ func (s *MyAMQP) Consumer(options ConsumerOptions, handler HandleFunc) (*Consume
 	return consumer, nil
 }
 
+// SetCloseContext sets a context that closes the consumer.
 func (c *Consumer) SetCloseContext(ctx context.Context) chan error {
 	chErr := make(chan error)
 	go func() {
@@ -88,10 +104,13 @@ func (c *Consumer) SetCloseContext(ctx context.Context) chan error {
 	return chErr
 }
 
+// Cancel cancels the consumer.
 func (c *Consumer) Cancel() error {
 	if err := c.channel.Cancel(c.options.name, true); err != nil {
 		return err
 	}
 
+	// Wait for the handler to finish. This is needed because the handler
+	// is running in a goroutine.
 	return <-c.done
 }

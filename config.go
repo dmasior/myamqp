@@ -1,27 +1,61 @@
 package myamqp
 
+import "errors"
+
+var (
+	ErrDialFuncCannotBeNil = errors.New("dial func cannot be nil")
+)
+
+// Config represents a configuration.
+// It is used to configure a MyAMQP instance.
 type Config struct {
-	dialFn DialFunc
-	retry  *Retry
+	dialFunc        DialFunc
+	reconnectPolicy *ReconnectPolicy
+	onConnect       func(*MyAMQP)
+	qos             *Qos
 }
 
-// NewConfig creates a new Config with the given DialFunc.
-func NewConfig(dialFn DialFunc) *Config {
-	return &Config{
-		dialFn: dialFn,
+// NewConfig creates a new Config with the given URL.
+func NewConfig(dialFunc DialFunc) (*Config, error) {
+	if dialFunc == nil {
+		return nil, ErrDialFuncCannotBeNil
 	}
+
+	return &Config{
+		dialFunc: dialFunc,
+	}, nil
 }
 
-// WithRetry sets the Retry on the Config.
-func (c *Config) WithRetry(retry *Retry) *Config {
-	c.retry = retry
+// WithReconnectPolicy sets the ReconnectPolicy on the Config.
+func (c *Config) WithReconnectPolicy(rp *ReconnectPolicy) *Config {
+	c.reconnectPolicy = rp
 	return c
 }
 
-func (c *Config) DialFn() DialFunc {
-	return c.dialFn
+// WithOnConnect sets the OnConnect callback on the Config.
+func (c *Config) WithOnConnect(callback func(*MyAMQP)) *Config {
+	c.onConnect = callback
+	return c
 }
 
-func (c *Config) Retry() *Retry {
-	return c.retry
+// WithQos sets the Qos on the Config.
+func (c *Config) WithQos(qos *Qos) *Config {
+	c.qos = qos
+	return c
+}
+
+func (c *Config) OnConnect() func(*MyAMQP) {
+	return c.onConnect
+}
+
+func (c *Config) Qos() *Qos {
+	return c.qos
+}
+
+func (c *Config) ReconnectPolicy() *ReconnectPolicy {
+	return c.reconnectPolicy
+}
+
+func (c *Config) DialFunc() DialFunc {
+	return c.dialFunc
 }
