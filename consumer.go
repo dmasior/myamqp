@@ -34,7 +34,22 @@ func (s *MyAMQP) Consumer(options *ConsumerOptions, handler HandleFunc) (*Consum
 		return nil, ErrQueueOptionsCannotBeNil
 	}
 
-	if err := s.channel.ExchangeDeclare(
+	channel, err := s.conn.Channel()
+
+	if s.config.Qos() != nil {
+		err = channel.Qos(
+			s.config.Qos().PrefetchCount(),
+			s.config.Qos().PrefetchSize(),
+			s.config.Qos().Global(),
+		)
+		if err != nil {
+			s.conn.Close()
+			s.conn = nil
+			return nil, err
+		}
+	}
+
+	if err = channel.ExchangeDeclare(
 		options.exchangeOpts.name,
 		options.exchangeOpts.kind,
 		options.exchangeOpts.durable,
@@ -46,7 +61,7 @@ func (s *MyAMQP) Consumer(options *ConsumerOptions, handler HandleFunc) (*Consum
 		return nil, err
 	}
 
-	if _, err := s.channel.QueueDeclare(
+	if _, err = channel.QueueDeclare(
 		options.queueOpts.name,
 		options.queueOpts.durable,
 		options.queueOpts.autoDelete,
@@ -57,7 +72,7 @@ func (s *MyAMQP) Consumer(options *ConsumerOptions, handler HandleFunc) (*Consum
 		return nil, err
 	}
 
-	if err := s.channel.QueueBind(
+	if err = channel.QueueBind(
 		options.queueOpts.name,
 		options.queueOpts.routingKey,
 		options.exchangeOpts.name,
@@ -67,7 +82,7 @@ func (s *MyAMQP) Consumer(options *ConsumerOptions, handler HandleFunc) (*Consum
 		return nil, err
 	}
 
-	deliveries, err := s.channel.Consume(
+	deliveries, err := channel.Consume(
 		options.queueOpts.name,
 		options.name,
 		options.autoAck,
@@ -82,7 +97,7 @@ func (s *MyAMQP) Consumer(options *ConsumerOptions, handler HandleFunc) (*Consum
 
 	consumer := &Consumer{
 		options: options,
-		channel: s.channel,
+		channel: channel,
 		done:    make(chan error),
 	}
 

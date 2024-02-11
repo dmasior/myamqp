@@ -39,19 +39,23 @@ func main() {
 				}),
 		)
 
-	// Create a new MyAMQP and connect.
-	instance, err := myamqp.New(config)
-	_, err = instance.Connect(ctx)
+	// Create and run a new MyAMQP.
+	amqp, err := myamqp.New(config)
 	if err != nil {
 		slog.ErrorContext(ctx, err.Error())
 		return
 	}
 
-	<-ctx.Done()
-	slog.InfoContext(ctx, "context done, bye")
+	err = amqp.Run(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx, err.Error())
+		return
+	}
+
+	slog.InfoContext(ctx, "done, bye")
 }
 
-func setupConsumer(ctx context.Context, instance *myamqp.MyAMQP) {
+func setupConsumer(ctx context.Context, amqp *myamqp.MyAMQP) {
 	// Create a new ConsumerOptions.
 	consumerOptions := myamqp.NewConsumerOptions(
 		"consumer-tag",
@@ -70,8 +74,8 @@ func setupConsumer(ctx context.Context, instance *myamqp.MyAMQP) {
 		done <- nil
 	}
 
-	// Start a consumer.
-	consumer, err := instance.Consumer(consumerOptions, handler)
+	// Attach a consumer to the MyAMQP.
+	consumer, err := amqp.Consumer(consumerOptions, handler)
 	if err != nil {
 		slog.ErrorContext(ctx, err.Error())
 		return

@@ -12,7 +12,7 @@ go get github.com/dmasior/myamqp
 ```
 
 ## Usage
-### Configuration and connection
+### New MyAMQP instance
 ```go
 // Create a new Config. It needs a dialer function which returns an amqp091.Connection.
 config, err := myamqp.NewConfig(func() (*amqp091.Connection, error) {
@@ -21,25 +21,30 @@ config, err := myamqp.NewConfig(func() (*amqp091.Connection, error) {
 if err != nil {
     // handle error
 }
-// Setup on connect callback.
 config = config.
+    // WithOnConnect allows to set a callback which is called after a successful connection.
     WithOnConnect(func(myAMQP *myamqp.MyAMQP) {
         slog.InfoContext(ctx, "connected")
         // You can also start a consumer here.
         // See example consumer in examples/consumer/main.go
     }).
-    // Setup reconnect policy.
+	// WithReconnectPolicy allows to set a reconnect policy.
     WithReconnectPolicy(
         myamqp.NewReconnectPolicy(myamqp.MaxReconnectUnlimited, 1*time.Second).
-            // Setup error listener.
+            // ReconnectPolicy can be extended with error listener.
             WithErrorListener(func(err error) {
                 slog.ErrorContext(ctx, err.Error())
             }),
     )
 
-// Create a new MyAMQP instance and connect to the server.
-instance, err := myamqp.New(config)
-_, err = instance.Connect(ctx)
+// Create and run a new MyAMQP.
+amqp, err := myamqp.New(config)
+if err != nil {
+    // handle error
+}
+
+// Use amqp.Run after setting up all consumers and producers in `WithOnConnect` callback.
+err = amqp.Run(ctx)
 if err != nil {
     // handle error
 }
@@ -65,8 +70,8 @@ handler := func(deliveries <-chan amqp091.Delivery, done chan error) {
     done <- nil
 }
 
-// Start a consumer.
-consumer, err := myAMQP.Consumer(consumerOptions, handler)
+// Attach a new consumer to the MyAMQP.
+consumer, err := amqp.Consumer(consumerOptions, handler)
 if err != nil {
     // handle error
 }
@@ -84,8 +89,8 @@ producerOptions := myamqp.NewProducerOptions(
     myamqp.NewExchangeOptions("/", myamqp.ExchangeTypeDirect),
 )
 
-// Create a new Producer.
-producer, err := myAMQP.Producer(producerOptions)
+// Attach a new producer to the MyAMQP.
+producer, err := amqp.Producer(producerOptions)
 if err != nil {
     // handle error
 }

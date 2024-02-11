@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os/signal"
 	"strconv"
@@ -40,26 +41,30 @@ func main() {
 				}),
 		)
 
-	// Create a new MyAMQP and connect.
-	instance, err := myamqp.New(config)
-	_, err = instance.Connect(ctx)
+	// Create and run a new MyAMQP.
+	amqp, err := myamqp.New(config)
 	if err != nil {
 		slog.ErrorContext(ctx, err.Error())
 		return
 	}
 
-	<-ctx.Done()
+	err = amqp.Run(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx, err.Error())
+		return
+	}
+
 	slog.InfoContext(ctx, "context done, bye")
 }
 
-func setupProducer(ctx context.Context, myAMQP *myamqp.MyAMQP) {
+func setupProducer(ctx context.Context, amqp *myamqp.MyAMQP) {
 	// Create a new ProducerOptions.
 	producerOptions := myamqp.NewProducerOptions(
 		myamqp.NewExchangeOptions("/", myamqp.ExchangeTypeDirect),
 	)
 
 	// Create a new Producer.
-	producer, err := myAMQP.Producer(producerOptions)
+	producer, err := amqp.Producer(producerOptions)
 	if err != nil {
 		slog.ErrorContext(ctx, err.Error())
 		return
@@ -83,6 +88,8 @@ func setupProducer(ctx context.Context, myAMQP *myamqp.MyAMQP) {
 				slog.ErrorContext(ctx, err.Error())
 				return
 			}
+
+			slog.InfoContext(ctx, fmt.Sprintf("published `%d` message", i))
 
 			<-time.After(1 * time.Second)
 		}

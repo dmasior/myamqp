@@ -17,7 +17,6 @@ var (
 type MyAMQP struct {
 	config  *Config
 	conn    *amqp091.Connection
-	channel *amqp091.Channel
 	connMu  sync.Mutex
 	rCtx    context.Context
 	rCancel context.CancelFunc
@@ -38,65 +37,14 @@ func New(config *Config) (*MyAMQP, error) {
 	}, nil
 }
 
-// Connect establishes a connection to the AMQP server and returns the connection object.
-// If the connection is already established, it returns the existing connection object.
-// If the connection is closed, it attempts to reconnect.
-// If the context is done, it returns an error.
-func (s *MyAMQP) Connect(ctx context.Context) (*amqp091.Connection, error) {
+// Run runs the MyAMQP. It connects to the AMQP server and handles reconnects.
+func (s *MyAMQP) Run(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return ctx.Err()
 	default:
 	}
 
-	s.connMu.Lock()
-	defer s.connMu.Unlock()
-
-	if s.conn != nil && !s.conn.IsClosed() {
-		return s.conn, nil
-	}
-
-	// Connect to the AMQP server.
-	conn, err := s.config.DialFunc()()
-	if err != nil {
-		return nil, err
-	}
-	s.conn = conn
-
-	// Create a new channel.
-	s.channel, err = s.conn.Channel()
-	if err != nil {
-		s.conn.Close()
-		s.conn = nil
-		return nil, err
-	}
-
-	if s.config.Qos() != nil {
-		err = s.channel.Qos(
-			s.config.Qos().PrefetchCount(),
-			s.config.Qos().PrefetchSize(),
-			s.config.Qos().Global(),
-		)
-		if err != nil {
-			s.conn.Close()
-			s.conn = nil
-			return nil, err
-		}
-	}
-
-	if s.config.OnConnect() != nil {
-		s.config.OnConnect()(s)
-	}
-
-	// Setup reconnectPolicy.
-	if s.config.ReconnectPolicy() != nil {
-		s.setupReconnect(ctx)
-	}
-
-	return s.conn, nil
-}
-
-func (s *MyAMQP) setupReconnect(ctx context.Context) {
 	errListener := s.config.ReconnectPolicy().ErrListener()
 	if errListener == nil {
 		errListener = func(err error) {}
@@ -104,75 +52,68 @@ func (s *MyAMQP) setupReconnect(ctx context.Context) {
 
 	s.rCtx, s.rCancel = context.WithCancel(ctx)
 
-	go func() {
-		for {
-			select {
-			// Check if the context is done after we try to connect.
-			case <-s.rCtx.Done():
-				if s.conn != nil && !s.conn.IsClosed() {
-					err := s.conn.Close()
-					if err != nil {
-						errListener(err)
-					}
-				}
-				errListener(s.rCtx.Err())
-				return
-			default:
-				if s.conn != nil && !s.conn.IsClosed() {
-					<-time.After(time.Millisecond * 100)
-					continue
-				}
+	reconnErrCh := make(chan error, 1)
+	_, errCh, err := s.connect()
+	if err != nil {
+		errListener(err)
+		reconnErrCh <- err
+	}
 
-				reconnectPolicy := s.config.ReconnectPolicy()
-				if reconnectPolicy.Max() != MaxReconnectUnlimited && reconnectPolicy.Count() >= reconnectPolicy.Max() {
-					errListener(ErrMaxReconnectsReached)
-					return
-				}
-
-				reconnectPolicy.Inc()
-				<-time.After(reconnectPolicy.Backoff())
-
-				conn, err := s.config.DialFunc()()
-				if err != nil {
-					s.conn = nil
-					errListener(err)
-					continue
-				}
-				s.conn = conn
-				s.channel, err = s.conn.Channel()
-				if err != nil {
-					errListener(err)
-					err = s.conn.Close()
-					if err != nil {
-						errListener(err)
-					}
-					s.conn = nil
-					continue
-				}
-
-				if s.config.Qos() != nil {
-					err = s.channel.Qos(
-						s.config.Qos().PrefetchCount(),
-						s.config.Qos().PrefetchSize(),
-						s.config.Qos().Global(),
-					)
-					if err != nil {
-						errListener(err)
-						err = s.conn.Close()
-						if err != nil {
-							errListener(err)
-						}
-						s.conn = nil
-						continue
-					}
-				}
-
-				if s.config.onConnect != nil {
-					s.config.onConnect(s)
+	for {
+		select {
+		case <-s.rCtx.Done():
+			if s.conn != nil && !s.conn.IsClosed() {
+				cErr := s.conn.Close()
+				if cErr != nil {
+					errListener(cErr)
 				}
 			}
+			errListener(s.rCtx.Err())
+			return s.rCtx.Err()
+		case <-reconnErrCh:
+			reconnectPolicy := s.config.ReconnectPolicy()
+			if reconnectPolicy.Max() != MaxReconnectUnlimited && reconnectPolicy.Count() >= reconnectPolicy.Max() {
+				errListener(ErrMaxReconnectsReached)
+				return ErrMaxReconnectsReached
+			}
+
+			// Setup new error channel and reconnect.
+			reconnectPolicy.Inc()
+			<-time.After(reconnectPolicy.Backoff())
+
+			var err error
+			_, errCh, err = s.connect()
+			if err != nil {
+				errListener(err)
+				reconnErrCh <- err
+			}
+		case rcErr := <-errCh:
+			reconnErrCh <- rcErr
+		default:
+			<-time.After(time.Millisecond * 500)
 		}
-	}()
+	}
+}
+
+func (s *MyAMQP) connect() (*amqp091.Connection, chan *amqp091.Error, error) {
+	s.connMu.Lock()
+	defer s.connMu.Unlock()
+	errCh := make(chan *amqp091.Error)
+
+	// Run to the AMQP server.
+	conn, err := s.config.DialFunc()()
+	if err != nil {
+		return nil, errCh, err
+	}
+	s.conn = conn
+
+	if s.config.OnConnect() != nil {
+		s.config.OnConnect()(s)
+	}
+
+	s.conn.NotifyClose(errCh)
+
+	return s.conn, errCh, nil
 }
 
 // Close closes the connection to the AMQP server and cancels the reconnect goroutine.

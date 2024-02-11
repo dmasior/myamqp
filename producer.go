@@ -26,7 +26,25 @@ func (s *MyAMQP) Producer(options *ProducerOptions) (*Producer, error) {
 		return nil, ErrExchangeOptionsCannotBeNil
 	}
 
-	if err := s.channel.ExchangeDeclare(
+	channel, err := s.conn.Channel()
+	if err != nil {
+		return nil, err
+	}
+
+	if s.config.Qos() != nil {
+		err = channel.Qos(
+			s.config.Qos().PrefetchCount(),
+			s.config.Qos().PrefetchSize(),
+			s.config.Qos().Global(),
+		)
+		if err != nil {
+			s.conn.Close()
+			s.conn = nil
+			return nil, err
+		}
+	}
+
+	if err = channel.ExchangeDeclare(
 		options.exchangeOpts.name,
 		options.exchangeOpts.kind,
 		options.exchangeOpts.durable,
@@ -39,7 +57,7 @@ func (s *MyAMQP) Producer(options *ProducerOptions) (*Producer, error) {
 	}
 
 	if options.queueOpts != nil {
-		if _, err := s.channel.QueueDeclare(
+		if _, err = channel.QueueDeclare(
 			options.queueOpts.name,
 			options.queueOpts.durable,
 			options.queueOpts.autoDelete,
@@ -50,7 +68,7 @@ func (s *MyAMQP) Producer(options *ProducerOptions) (*Producer, error) {
 			return nil, err
 		}
 
-		if err := s.channel.QueueBind(
+		if err = channel.QueueBind(
 			options.queueOpts.name,
 			options.queueOpts.routingKey,
 			options.exchangeOpts.name,
@@ -63,7 +81,7 @@ func (s *MyAMQP) Producer(options *ProducerOptions) (*Producer, error) {
 
 	producer := &Producer{
 		options: options,
-		channel: s.channel,
+		channel: channel,
 	}
 
 	return producer, nil
