@@ -1,7 +1,6 @@
 # MyAMQP
-The AMQP tools for Golang with modern and developer friendly API.
-Out of the box: reconnections, context support (graceful shutdown) and more.
-It wraps [rabbitmq/amqp091-go](https://github.com/rabbitmq/amqp091-go) library.
+The AMQP tools for Golang with developer-friendly API. It's a wrapper around the [rabbitmq/amqp091-go](https://github.com/rabbitmq/amqp091-go) library, providing helper functions for faster and easier development.
+Reconnections, context support (graceful shutdown), and more.
 
 ## Docs
 [![GoDoc](https://godoc.org/github.com/dmasior/myamqp?status.svg)](http://godoc.org/github.com/dmasior/myamqp)
